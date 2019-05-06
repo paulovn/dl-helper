@@ -1,5 +1,5 @@
-dl-utils
-========
+dl-helper
+=========
 
 A (small) Python package that contains a number of miscellaneous utility
 classes and functions to ease the work of developing Deep Learning models,

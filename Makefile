@@ -10,6 +10,11 @@ PKG := dist/$(NAME)-$(VERSION).tar.gz
 
 # -----------------------------------------------------------------------
 
+$(PKG):  $(VERSION_FILE) setup.py
+	python3 setup.py sdist
+
+# -----------------------------------------------------------------------
+
 all: $(PKG)
 
 
@@ -25,6 +30,8 @@ uninstall:
 
 # -----------------------------------------------------------------------
 
-$(PKG):  $(VERSION_FILE) setup.py
-	python3 setup.py sdist
+upload: all
+	twine upload $(PKG)
 
+upload-test: all
+	twine upload -r pypitest $(PKG)
