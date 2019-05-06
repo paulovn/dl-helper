@@ -1,8 +1,10 @@
 
-NAME := dl-utils
+NAME := dl-helper
 
-VERSION_FILE := VERSION.txt
-VERSION := $(shell tr -d '\n ' < $(VERSION_FILE))
+# Package version: taken from the __init__.py file
+VERSION_FILE := dl_helper/__init__.py
+VERSION	     := $(shell grep VERSION $(VERSION_FILE) | sed -r "s/VERSION = '(.*)'/\1/")
+
 PKG := dist/$(NAME)-$(VERSION).tar.gz
 
 
@@ -24,5 +26,5 @@ uninstall:
 # -----------------------------------------------------------------------
 
 $(PKG):  $(VERSION_FILE) setup.py
-	python setup.py sdist
+	python3 setup.py sdist
 

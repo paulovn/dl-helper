@@ -1,4 +1,7 @@
 """
+Utilities for Keras models I/O
+Paulo Villegas, 2017-2019
+
 Keras native save_weights & load_weights methods choke on empty weights, since
 the h5py library can't load/save empty attributes (fixed in master, not yet in
 release 2.6). These functions solve the problem by skipping weight management
@@ -7,7 +10,6 @@ in layers with no weights (e.g. an Activation or MaxPool layer)
 
 from __future__ import print_function
 import sys
-import json
 import os.path
 import numpy as np
 
@@ -16,14 +18,14 @@ import h5py
 
 
 if sys.version[0] == '3':
-    items = lambda x : x.items()
+    items = lambda x: x.items()
 else:
-    items = lambda x : x.iteritems()
+    items = lambda x: x.iteritems()
 
 
 # --------------------------------------------------------------------------
 
-def save_weights( model, basename ):
+def save_weights(model, basename):
     """
     Modification of keras.engine.topology.Container.save_weights to avoid
     saving empty weights
@@ -32,7 +34,7 @@ def save_weights( model, basename ):
         f = h5py.File(basename+'.w.h5', 'w')
 
         if hasattr(model, 'flattened_layers'):
-            # support for legacy Sequential/Merge behavior                      
+            # support for legacy Sequential/Merge behavior
             flattened_layers = model.flattened_layers
         else:
             flattened_layers = model.layers
@@ -135,92 +137,105 @@ from collections import defaultdict
 import numpy as np
 import time
 
-clock = getattr( time, 'perf_time', time.clock )
+clock = getattr(time, 'perf_time', time.clock)
 
-class MetricHistory( Callback ):
+class MetricHistory(Callback):
     '''
-    A Keras callback class that tracks all evaluation metrics, 
-    both across batches and across epochs
+    A Keras callback class that tracks all evaluation metrics,
+    both across mini-batches (metrics_batch) and across epochs (metrics_epoch)
     '''
 
     def on_train_begin(self, logs={}):
-        self.metrics_batch = defaultdict( list )
-        self.metrics_epoch = defaultdict( list )
-    
-    def on_epoch_begin( self, epoch, logs={} ):
+        self.metrics_batch = defaultdict(list)
+        self.metrics_epoch = defaultdict(list)
+
+    def on_epoch_begin(self, epoch, logs={}):
+        # Start to mesure time; initialize storage for batch metrics
         self.epoch_start = clock()
-        self.batches = defaultdict( list )
+        self.batches = defaultdict(list)
 
     def on_batch_end(self, batch, logs={}):
         # Store batch metrics
         for k in self.params['metrics']:
             if k in logs:
-                self.batches[k].append( logs[k] )
+                self.batches[k].append(logs[k])
 
-    def on_epoch_end( self, epoch, logs={} ):
+    def on_epoch_end(self, epoch, logs={}):
         # Store epoch metrics
         for k in self.params['metrics']:
             if k in logs:
-                self.metrics_epoch[k].append( logs[k] )
-        self.metrics_epoch['time'].append( clock() - self.epoch_start )
+                self.metrics_epoch[k].append(logs[k])
+        self.metrics_epoch['time'].append(clock() - self.epoch_start)
         # Consolidate batch metrics
-        for k,v in items(self.batches):
-            self.metrics_batch[k].append( np.array(v) )
+        for k, v in items(self.batches):
+            self.metrics_batch[k].append(np.array(v))
         del self.batches
 
     def on_train_end(self, logs={}):
-        self.metrics_batch = { k : np.array(v) 
-                               for k,v in items(self.metrics_batch) }
+        # Create the mini-batch metric array dictionary
+        self.metrics_batch = {k: np.array(v)
+                              for k, v in items(self.metrics_batch)}
 
 
 # --------------------------------------------------------------------------
 
 
-def history_load( name ):
+def history_load(name):
     '''
     Load a DetailedHistory object from an HDF5 file
     '''
     if not name.endswith('.h5'):
         name += '.h5'
     f = h5py.File(name, 'r')
-    h = type( 'SavedHistory', (object,), {} )
+    h = type('SavedHistory', (object,), {})
     try:
         # Load params
         h.params = {}
         g = f['params']
-        for k,v in items(g.attrs):
+        for k, v in items(g.attrs):
+            # convert an NumPy string array into a list of str
+            if isinstance(v, np.ndarray) and v.dtype.char == 'S':
+                v = [s.decode('utf-8') for s in v]
             h.params[k] = v
         # Load epoch metrics
         g = f['metrics/epoch']
-        h.metrics_epoch = { k : np.copy(v) for k,v in items(g) }
+        h.metrics_epoch = {k: np.copy(v) for k, v in items(g)}
         # Load batch metrics
         g = f['metrics/batch']
-        h.metrics_batch = { k : np.copy(v) for k,v in items(g) }
+        h.metrics_batch = {k: np.copy(v) for k, v in items(g)}
     finally:
         f.close()
     return h
 
 
-def history_save( history, name ):
+def history_save(history, name):
     '''
     Save a DetailedHistory object into an HDF5 file
+    It stores:
+     * params
+     * metrics_epoch
+     * metrics_batch
     '''
     if not name.endswith('.h5'):
         name += '.h5'
     f = h5py.File(name, 'w')
     try:
-        # Load params
+        # Save params
         g = f.create_group('params')
-        for k,v in items(history.params):
+        for k, v in items(history.params):
+            # check a list of strings -- possible errors in H5 (no unicode support)
+            # see https://github.com/h5py/h5py/issues/441
+            if isinstance(v, list):
+                v = [e.encode('utf-8') if isinstance(e, str) else e for e in v]
             g.attrs[k] = v
         # Save epoch metrics
         g = f.create_group('metrics/epoch')
-        for n,m in items(history.metrics_epoch):
-            dat = g.create_dataset(n, data=np.array(m) )
+        for n, m in items(history.metrics_epoch):
+            dat = g.create_dataset(n, data=np.array(m))
         # Save batch metrics
         g = f.create_group('metrics/batch')
-        for n,m in items(history.metrics_batch):
-            dat = g.create_dataset(n, data=np.array(m) )
+        for n, m in items(history.metrics_batch):
+            dat = g.create_dataset(n, data=np.array(m))
         f.flush()
     finally:
         f.close()
@@ -228,7 +243,7 @@ def history_save( history, name ):
 
 # --------------------------------------------------------------------------
 
-def model_save( model, basename, history=None ):
+def model_save(model, basename, history=None):
     """
     Save a full model: architecture and weights, into a file
       @param model (Model): the Keras model to save
@@ -236,14 +251,14 @@ def model_save( model, basename, history=None ):
         JSON file (model architecture) and an HDF5 file (model weights)
       @param history (History): optional training history to save
     """
-    with open( basename+'.m.json', 'w') as f:
-        f.write( model.to_json() )
-    save_weights( model, basename )
+    with open(basename+'.m.json', 'w') as f:
+        f.write(model.to_json())
+    save_weights(model, basename)
     if history:
-        history_save( history, basename + '.h' )
+        history_save(history, basename + '.h')
 
 
-def model_load( basename, compile={}, history=True ):
+def model_load(basename, compile={}, history=True):
     """
     Load a model saved with model_save(): structure & weights will be
     restored
@@ -253,12 +268,10 @@ def model_load( basename, compile={}, history=True ):
     """
     from keras.models import model_from_json
     model = model_from_json(open(basename+'.m.json').read())
-    model.compile( **compile )
-    load_weights( model, basename+'.w.h5' )
+    model.compile(**compile)
+    load_weights(model, basename+'.w.h5')
     if not history:
         return model
-    elif not os.path.exists( basename + '.h.h5' ):
+    elif not os.path.exists(basename + '.h.h5'):
         return model, None
-    return model, history_load( basename + '.h' )
-
-
+    return model, history_load(basename + '.h')
