@@ -1,7 +1,9 @@
 '''
 Provide objects that allow capturing stdout/stderr for later replay.
-Intended for IPython notebooks, in which if we close the browser window 
+Intended for IPython notebooks, in which if we close the browser window
 with a running kernel all subsequent console output is lost
+
+Paulo Villegas, 2017
 
 Idea taken from
 http://stackoverflow.com/questions/29119657/ipython-notebook-keep-printing-to-notebook-output-after-closing-browser/29170902#29170902
@@ -16,7 +18,6 @@ from __future__ import print_function
 import os
 import sys
 import re
-import tempfile
 import threading
 from tempfile import mkstemp
 from time import sleep
@@ -27,13 +28,13 @@ PY2 = sys.version[0] == '2'
 if not PY2:
     xrange = range
     basestring = str
-    unicode = lambda msg, *args : msg
+    unicode = lambda msg, *args: msg
 
 _REAL_STDOUT = sys.stdout
 _REAL_STDERR = sys.stderr
 
 
-def clean_string( buf ):
+def clean_string(buf):
     '''
     Process backspaces and carriage returns in a string, eating up
     the chunks that would be overwritten by them if the string were
@@ -42,7 +43,7 @@ def clean_string( buf ):
     # Process carriage returns (except \r\n windows-type eol)
     buf = re.sub('[^\r\n]+\r(?!\n)', '', buf)
     # Remove backspaces at the beginning of a line
-    buf = re.sub( '^\b+|(?<=[\n])\b+', '', buf )
+    buf = re.sub('^\b+|(?<=[\n])\b+', '', buf)
     # Process backspaces
     while '\b' in buf:
         buf = re.sub('[^\b]\b', '', buf)
@@ -51,7 +52,7 @@ def clean_string( buf ):
 
 # -------------------------------------------------------------------------
 
-class OutputDest( object ):
+class OutputDest(object):
     """
     A file-like object that can print both to stdout and to a file.
     """
@@ -62,8 +63,8 @@ class OutputDest( object ):
         self.console = _REAL_STDOUT
         if out is None:
             self.log = io.StringIO()
-        elif isinstance(out,basestring):
-            self.log = io.open(out,'w',newline='',encoding=encoding)
+        elif isinstance(out, basestring):
+            self.log = io.open(out, 'w', newline='', encoding=encoding)
         else:
             self.log = out
 
@@ -78,17 +79,17 @@ class OutputDest( object ):
         self.close()
 
     def write(self, message):
-        self.log.write( unicode(message,self._encoding,'replace') )
+        self.log.write(unicode(message, self._encoding, 'replace'))
         self.log.flush()
         if self._do_console:
             self.console.write(message)
-        
+
     def close(self):
         if self.log is not None:
             self.log.close()
             self.log = None
 
-    def truncate(self,*args):
+    def truncate(self, *args):
         self.log.truncate(*args)
 
     def __getattr__(self, attr):
@@ -98,9 +99,9 @@ class OutputDest( object ):
 # -------------------------------------------------------------------------
 
 
-class ConsoleCapture( object ):
+class ConsoleCapture(object):
     '''
-    An object that captures the console output and redirects it to a 
+    An object that captures the console output and redirects it to a
     temporal file (and optionally also print it out to console).
     It can be started & stopped at will.
     '''
@@ -108,7 +109,7 @@ class ConsoleCapture( object ):
         self._on = False
         self.fname = None
 
-    def start( self, console=True, name=None, dir=None, encoding=None ):
+    def start(self, console=True, name=None, dir=None, encoding=None):
         """
         Start capturing console output into a file
          :param console: whether to also print out everything to console too
@@ -116,15 +117,15 @@ class ConsoleCapture( object ):
          :param dir: directory where to write the logfile (default is current)
          :param encoding: charset encoding to use for the file
         """
-        logname = '{}-'.format( name or 'notebook' )
-        f, self.fname = mkstemp( prefix=logname, suffix='.log', 
-                                 dir=dir or os.getcwd(), text=True )
+        logname = '{}-'.format(name or 'notebook')
+        f, self.fname = mkstemp(prefix=logname, suffix='.log',
+                                dir=dir or os.getcwd(), text=True)
         self._enc = encoding
         self._on = True
-        self.log = OutputDest( io.open(f,'w',newline=''), console, encoding )
+        self.log = OutputDest(io.open(f, 'w', newline=''), console, encoding)
         self.log.__enter__()
 
-    def stop( self ):
+    def stop(self):
         """
         Stop console capture.
         """
@@ -133,7 +134,7 @@ class ConsoleCapture( object ):
             self._on = False
         return self
 
-    def reset( self ):
+    def reset(self):
         """
         Delete all captured data so far. Keep capturing.
         """
@@ -141,41 +142,41 @@ class ConsoleCapture( object ):
             self.logger.truncate(0)
         return self
 
-    def remove( self ):
+    def remove(self):
         """
         Stop capture and remove the captured file
         """
         if self._on:
             self.stop()
         if self.fname:
-            os.unlink( self.fname )
+            os.unlink(self.fname)
             self.fname = None
         return self
 
-    def reprint( self, hdr=None, clean=False ):
+    def reprint(self, hdr=None, clean=False):
         """
         Print out to the real console the captured data, with an optional header
         """
         if hdr:
-            _REAL_STDOUT.write( hdr )
-        buf = self.data if not clean else clean_string( self.data )
+            _REAL_STDOUT.write(hdr)
+        buf = self.data if not clean else clean_string(self.data)
         if buf:
-            _REAL_STDOUT.write( buf )
+            _REAL_STDOUT.write(buf)
             _REAL_STDOUT.flush()
         return self
 
     @property
-    def data( self ):
+    def data(self):
         """
         Return the captured data
         """
         if self.fname:
-            with io.open(self.fname,'r',newline='',encoding=self._enc) as f:
+            with io.open(self.fname, 'r', newline='', encoding=self._enc) as f:
                 return f.read()
 
 # -------------------------------------------------------------------------
 
-class ConsoleCaptureCtx( ConsoleCapture ):
+class ConsoleCaptureCtx(ConsoleCapture):
     '''
     A console capture object to be used as a context manager.
     Two methods can be used inside or outside the "with" context to obtain
@@ -185,8 +186,8 @@ class ConsoleCaptureCtx( ConsoleCapture ):
       * `data` (available as a property) will return it
     '''
 
-    def __init__( self, verbose=True, name=None, logdir=None, encoding='utf-8',
-                  delete=True ):
+    def __init__(self, verbose=True, name=None, logdir=None, encoding='utf-8',
+                 delete=True):
         '''
         Create the context object
         '''
@@ -194,40 +195,40 @@ class ConsoleCaptureCtx( ConsoleCapture ):
         self._args = verbose, name, logdir, encoding
         self._result = None
         self._delete = delete
-        super(ConsoleCapture,self).__init__()
+        super(ConsoleCapture, self).__init__()
 
-    def __enter__( self ):
+    def __enter__(self):
         with self._lock:
-            self.start( *self._args )
+            self.start(*self._args)
             return self
 
-    def __exit__( self, *args ):
+    def __exit__(self, *args):
         with self._lock:
-            self._result = super(ConsoleCaptureCtx,self).data
+            self._result = super(ConsoleCaptureCtx, self).data
             if self._delete:
                 self.remove()
             else:
                 self.stop()
 
     @property
-    def data( self ):
+    def data(self):
         '''
-        Return the captured data. Override parent so that we can return data 
-        even outside the context, when the file does not exist anymore (thanks 
+        Return the captured data. Override parent so that we can return data
+        even outside the context, when the file does not exist anymore (thanks
         to our cached copy)
         '''
         with self._lock:
-            return self._result if self._result is not None else super(ConsoleCaptureCtx,self).data
-        
+            return self._result if self._result is not None else super(ConsoleCaptureCtx, self).data
+ 
 
 # -------------------------------------------------------------------------
 
-class ThrStatus( object ):
+class ThrStatus(object):
     '''An enum-like object to hold the thread status'''
-    CREATED,RUNNING,ENDED,ABORTED,REAPED = range(5)
-    
+    CREATED, RUNNING, ENDED, ABORTED, REAPED = range(5)
 
-class ProcessingThread( threading.Thread ):
+
+class ProcessingThread(threading.Thread):
     '''
     A thread that wraps a callable and captures its stdout/stderr,
     so that it can be printed out from the main thread.
@@ -240,43 +241,43 @@ class ProcessingThread( threading.Thread ):
     When calling `output()` after the thread has finished, it is automatically
     joined.
     '''
-    
-    def __init__( self, _callable, *args, **kwargs ):
+
+    def __init__(self, _callable, *args, **kwargs):
         '''
         Initialize it with the callable to execute plus its arguments
         '''
-        super(ProcessingThread,self).__init__()
+        super(ProcessingThread, self).__init__()
         self._call = _callable, args, kwargs
         self._st = ThrStatus.CREATED
         self._ctx = None
-        self._kwargs = { 'verbose': True,
-                         'delete': True,
-                         'encoding' : 'utf-8' }
+        self._kwargs = {'verbose': True,
+                        'delete': True,
+                        'encoding': 'utf-8'}
 
     def run(self):
         '''
-        Thread execution entry point: execute the processing callable, 
+        Thread execution entry point: execute the processing callable,
         capturing its output
         '''
-        with ConsoleCaptureCtx( **self._kwargs ) as ctx:
+        with ConsoleCaptureCtx(**self._kwargs) as ctx:
             self.fname = ctx.fname
             self._ctx = ctx
             self._st = ThrStatus.RUNNING
             try:
-                self._call[0]( *self._call[1], **self._call[2] )
+                self._call[0](*self._call[1], **self._call[2])
             except Exception:
                 self._st = ThrStatus.ABORTED
                 raise
         self._st = ThrStatus.ENDED
 
-    def set_args( self, **kwargs ):
+    def set_args(self, **kwargs):
         '''
         Set execution arguments
         '''
-        self._kwargs.update( kwargs )
+        self._kwargs.update(kwargs)
         return self._kwargs
 
-    def close( self ):
+    def close(self):
         '''
         If the thread has finished or aborted, collect it
         '''
@@ -313,24 +314,24 @@ class ProcessingThread( threading.Thread ):
         '''
         if not self._ctx:
             return None
-        status = ("RUNNING" if self._st == ThrStatus.RUNNING else 
-                  "ABORTED" if self._st == ThrStatus.ABORTED else 
-                  "DONE" if self._st in (ThrStatus.ENDED,ThrStatus.REAPED) else 
-                  "STATUS: {}".format(self._st) )
+        status = ("RUNNING" if self._st == ThrStatus.RUNNING else
+                  "ABORTED" if self._st == ThrStatus.ABORTED else
+                  "DONE" if self._st in (ThrStatus.ENDED, ThrStatus.REAPED) else
+                  "STATUS: {}".format(self._st))
 
-        self._ctx.reprint( "\r----- {} -----\n".format(status), **kwargs )
+        self._ctx.reprint("\r----- {} -----\n".format(status), **kwargs)
         self.close()
 
 
 # -------------------------------------------------------------------------
 
 
-class ProcessWrap( object ):
+class ProcessWrap(object):
     '''
     A class to wrap a (possibly long running) process and collect all its
     standard output.
     '''
-    def __init__( self, _callable, *args, **kwargs ):
+    def __init__(self, _callable, *args, **kwargs):
         '''
         Create the object by giving it the callable to run and all the
         arguments that must be passed to it
@@ -338,57 +339,57 @@ class ProcessWrap( object ):
         self._p = _callable, args, kwargs
         self.tout = None
 
-    def _block( self ):
+    def _block(self):
         while self.tproc.status == ThrStatus.RUNNING:
-            sleep( 0.01 )
+            sleep(0.01)
         self.tproc.close()
 
-    def process( self, verbose=True, delete=True, logdir=None,
-                 encoding='utf-8', block=True ):
+    def process(self, verbose=True, delete=True, logdir=None,
+                encoding='utf-8', block=True):
         '''
         Launch the process
          :param verbose: whether to also output to console
          :param delete: delete the logfile holding the output upon termination
-         :param logdir: directory where to write the logfile (efault is current dir)
+         :param logdir: directory where to write the logfile (default is current dir)
          :param block: block the call while the processing thread is running
         '''
         if verbose:
-            print( "Launching process ... " )
+            print("Launching process ... ")
             sys.stdout.flush()
         # Create the thread
-        self.tproc = ProcessingThread( self._p[0], *self._p[1], **self._p[2] )
+        self.tproc = ProcessingThread(self._p[0], *self._p[1], **self._p[2])
         # Set context arguments
-        self.tproc.set_args( verbose=verbose, delete=delete, logdir=logdir,
-                             encoding=encoding )
+        self.tproc.set_args(verbose=verbose, delete=delete, logdir=logdir,
+                            encoding=encoding)
         # Start the thread
         self.tproc.start()
         # Wait till the thread confirms it has started
         while self.tproc.status == ThrStatus.CREATED:
-            sleep( 0.01 )
+            sleep(0.01)
         # If blocking, wait until the thread finishes
         if block:
             self._block()
 
-    def show( self, clean=False, block=False ):
+    def show(self, clean=False, block=False):
         '''
         Print the output generated by the processing thread
          :param clean: process control characters in the data (backspaces & carriage returns
             before printing out)
          :param block: whether the call will block until the processing thread has finished
         '''
-        self.tproc.reprint( clean=clean )
+        self.tproc.reprint(clean=clean)
         if block:
             self._block()
 
     @property
-    def data( self ):
+    def data(self):
         '''
         Return the data captured. Will work even if the process has ended.
         '''
         return self.tproc.data
 
     @property
-    def logname( self ):
+    def logname(self):
         '''
         Return the name of the logfile, or `None` if there isn't one
         '''
