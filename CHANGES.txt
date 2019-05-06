@@ -1,0 +1,5 @@
+v. 0.1.0
+ Keras improvements, update to Keras 2 API
+
+v. 0.0.1
+ Initial version

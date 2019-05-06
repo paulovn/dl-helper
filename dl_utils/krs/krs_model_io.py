@@ -177,7 +177,12 @@ class MetricHistory( Callback ):
 
 
 def history_load( name ):
-    f = h5py.File(name+'.h5', 'r')
+    '''
+    Load a DetailedHistory object from an HDF5 file
+    '''
+    if not name.endswith('.h5'):
+        name += '.h5'
+    f = h5py.File(name, 'r')
     h = type( 'SavedHistory', (object,), {} )
     try:
         # Load params
@@ -197,7 +202,12 @@ def history_load( name ):
 
 
 def history_save( history, name ):
-    f = h5py.File(name+'.h5', 'w')
+    '''
+    Save a DetailedHistory object into an HDF5 file
+    '''
+    if not name.endswith('.h5'):
+        name += '.h5'
+    f = h5py.File(name, 'w')
     try:
         # Load params
         g = f.create_group('params')
