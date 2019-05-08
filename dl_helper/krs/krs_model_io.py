@@ -2,33 +2,30 @@
 Utilities for Keras models I/O
 Paulo Villegas, 2017-2019
 
-Keras native save_weights & load_weights methods choke on empty weights, since
-the h5py library can't load/save empty attributes (fixed in master, not yet in
-release 2.6). These functions solve the problem by skipping weight management
-in layers with no weights (e.g. an Activation or MaxPool layer)
+Definition of two functions, model_save() and model_load(), that can save a
+Keras model and also its associated training history
 """
 
-from __future__ import print_function
-import sys
 import os.path
 import numpy as np
 
+from keras.models import load_model
 from keras import backend as K
 import h5py
-
-
-if sys.version[0] == '3':
-    items = lambda x: x.items()
-else:
-    items = lambda x: x.iteritems()
 
 
 # --------------------------------------------------------------------------
 
 def save_weights(model, basename):
     """
+    *LEGACY*
     Modification of keras.engine.topology.Container.save_weights to avoid
     saving empty weights
+
+    Keras native save_weights & load_weights methods choke on empty weights, since
+    the h5py library can't load/save empty attributes (fixed in master, not yet in
+    release 2.6). These functions solve the problem by skipping weight management
+    in layers with no weights (e.g. an Activation or MaxPool layer)
     """
     try:
         f = h5py.File(basename+'.w.h5', 'w')
@@ -69,6 +66,7 @@ def save_weights(model, basename):
 
 def load_weights(model, filepath):
     """
+    *LEGACY*
     Modification of keras.engine.topology.Container.load_weights to check
     layer weights presence before accessing
     """
@@ -167,14 +165,14 @@ class MetricHistory(Callback):
                 self.metrics_epoch[k].append(logs[k])
         self.metrics_epoch['time'].append(clock() - self.epoch_start)
         # Consolidate batch metrics
-        for k, v in items(self.batches):
+        for k, v in self.batches.items():
             self.metrics_batch[k].append(np.array(v))
         del self.batches
 
     def on_train_end(self, logs={}):
         # Create the mini-batch metric array dictionary
         self.metrics_batch = {k: np.array(v)
-                              for k, v in items(self.metrics_batch)}
+                              for k, v in self.metrics_batch.items()}
 
 
 # --------------------------------------------------------------------------
@@ -182,7 +180,7 @@ class MetricHistory(Callback):
 
 def history_load(name):
     '''
-    Load a DetailedHistory object from an HDF5 file
+    Load a MetricHistory object from an HDF5 file
     '''
     if not name.endswith('.h5'):
         name += '.h5'
@@ -192,17 +190,17 @@ def history_load(name):
         # Load params
         h.params = {}
         g = f['params']
-        for k, v in items(g.attrs):
+        for k, v in g.attrs.items():
             # convert an NumPy string array into a list of str
             if isinstance(v, np.ndarray) and v.dtype.char == 'S':
                 v = [s.decode('utf-8') for s in v]
             h.params[k] = v
         # Load epoch metrics
         g = f['metrics/epoch']
-        h.metrics_epoch = {k: np.copy(v) for k, v in items(g)}
+        h.metrics_epoch = {k: np.copy(v) for k, v in g.items()}
         # Load batch metrics
         g = f['metrics/batch']
-        h.metrics_batch = {k: np.copy(v) for k, v in items(g)}
+        h.metrics_batch = {k: np.copy(v) for k, v in g.items()}
     finally:
         f.close()
     return h
@@ -210,7 +208,7 @@ def history_load(name):
 
 def history_save(history, name):
     '''
-    Save a DetailedHistory object into an HDF5 file
+    Save a MetricHistory object into an HDF5 file
     It stores:
      * params
      * metrics_epoch
@@ -222,7 +220,7 @@ def history_save(history, name):
     try:
         # Save params
         g = f.create_group('params')
-        for k, v in items(history.params):
+        for k, v in history.params.items():
             # check a list of strings -- possible errors in H5 (no unicode support)
             # see https://github.com/h5py/h5py/issues/441
             if isinstance(v, list):
@@ -230,11 +228,11 @@ def history_save(history, name):
             g.attrs[k] = v
         # Save epoch metrics
         g = f.create_group('metrics/epoch')
-        for n, m in items(history.metrics_epoch):
+        for n, m in history.metrics_epoch.items():
             dat = g.create_dataset(n, data=np.array(m))
         # Save batch metrics
         g = f.create_group('metrics/batch')
-        for n, m in items(history.metrics_batch):
+        for n, m in history.metrics_batch.items():
             dat = g.create_dataset(n, data=np.array(m))
         f.flush()
     finally:
@@ -243,13 +241,13 @@ def history_save(history, name):
 
 # --------------------------------------------------------------------------
 
-def model_save(model, basename, history=None):
+def model_save_old(model, basename, history=None):
     """
-    Save a full model: architecture and weights, into a file
+    *LEGACY* Save a full model: architecture and weights, into a file
       @param model (Model): the Keras model to save
       @param basename (str): filename to use. Two files will be written: a
         JSON file (model architecture) and an HDF5 file (model weights)
-      @param history (History): optional training history to save
+      @param history (History): optional training history to save, as a third file
     """
     with open(basename+'.m.json', 'w') as f:
         f.write(model.to_json())
@@ -258,10 +256,10 @@ def model_save(model, basename, history=None):
         history_save(history, basename + '.h')
 
 
-def model_load(basename, compile={}, history=True):
+def model_load_old(basename, compile={}, history=True):
     """
-    Load a model saved with model_save(): structure & weights will be
-    restored
+    *LEGACY* Load a model saved with model_save_old(): structure & weights will be
+    restored, and the model will be compiled with the passed arguments
       @param basename (str): basename used to save it
       @param compile (dict): arguments to be used when compiling the model
       @param history (bool): load also training history, if available
@@ -270,6 +268,40 @@ def model_load(basename, compile={}, history=True):
     model = model_from_json(open(basename+'.m.json').read())
     model.compile(**compile)
     load_weights(model, basename+'.w.h5')
+    if not history:
+        return model
+    elif not os.path.exists(basename + '.h.h5'):
+        return model, None
+    return model, history_load(basename + '.h')
+
+
+# --------------------------------------------------------------------------
+
+def model_save(model, basename, history=None):
+    """
+    Save a full model: architecture and weights, into a file
+      @param model (Model): the Keras model to save
+      @param basename (str): filename to use.
+      @param history (History): optional training history to save, as an additional
+        file
+    """
+    if basename.endswith('.h5'):
+        basename = basename[:-3]
+    model.save(basename+'.h5')
+    if history:
+        history_save(history, basename + '.h')
+
+
+def model_load(basename, history=True):
+    """
+    Load a model saved with model_save(): structure & weights will be
+    restored, and the model will be re-compiled
+      @param basename (str): basename used to save it
+      @param history (bool): load also training history, if available
+    """
+    if basename.endswith('.h5'):
+        basename = basename[:-3]
+    model = load_model(basename + '.h5')
     if not history:
         return model
     elif not os.path.exists(basename + '.h.h5'):

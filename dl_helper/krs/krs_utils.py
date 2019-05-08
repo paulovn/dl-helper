@@ -8,8 +8,34 @@ from __future__ import division, print_function
 import numpy as np
 
 
+import keras
 from keras.utils.vis_utils import model_to_dot
 from IPython.core.display import SVG
+
+
+# ----------------------------------------------------------------------
+
+
+def model_thread_safe(model):
+    '''
+    This is needed to be able to use the Keras model in another thread (as it
+    is done if wrapped by ProcessWrap)
+
+    Tensorflow Graphs (https://www.tensorflow.org/api_docs/python/tf/Graph) are
+    not thread-safe. We need to perform all create operations for a session in a
+    single thread. So this has to be executed _before_ training starts.
+    '''
+    if keras.backend.backend() != 'tensorflow':
+        return
+
+    import tensorflow as tf
+
+    session = tf.Session()
+    keras.backend.set_session(session)
+
+    model._make_predict_function()
+    model._make_train_function()
+    model._make_test_function()
 
 
 # ----------------------------------------------------------------------
@@ -47,19 +73,29 @@ def model_layers_list(model):
 def pred_show(pred, truth=None):
     '''
     Show prediction results
+     :param pred (NumPy array): a set of predictions for test instances. Each
+       prediction is the vector of probabilities for each output class
+     :param truth (NumPy vector): the ground truth results: a vector with the
+       true classes for each test instance.
     '''
     print('  n res ' if truth is None else '  n res true    ', end='     ')
     for c in range(pred.shape[1]):
         print("{:7}".format(c+1), end=' ')
+    ok = 0
     for i, r in enumerate(pred):
         print('\n{:3}  {:2}'.format(i+1, np.argmax(r)+1), end=' ')
         if truth is not None:
             print("{:4}".format(truth[i]+1), end=' ')
             print("ok" if truth[i] == np.argmax(r) else "- ", end=" ")
+            ok += truth[i] == np.argmax(r)
         print(' -> ', end=' ')
         for c in r:
             print("{:7.5f}".format(c), end=' ')
+
     print()
+    if truth is not None:
+        num = pred.shape[0]
+        print("\ntotal: {}   ok: {}   accuracy: {:.3f}".format(num, ok, ok/num))
 
 
 # ----------------------------------------------------------------------
