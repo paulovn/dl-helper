@@ -130,22 +130,21 @@ def load_weights(model, filepath):
 
 # --------------------------------------------------------------------------
 
-from keras.callbacks import Callback
+from keras.callbacks import Callback, History
 from collections import defaultdict
-import numpy as np
 import time
 
 clock = getattr(time, 'perf_time', time.clock)
 
-class MetricHistory(Callback):
+class TrainingHistory(Callback):
     '''
     A Keras callback class that tracks all evaluation metrics,
-    both across mini-batches (metrics_batch) and across epochs (metrics_epoch)
+    both across mini-batches (history_batch) and across epochs (history_epoch)
     '''
 
     def on_train_begin(self, logs={}):
-        self.metrics_batch = defaultdict(list)
-        self.metrics_epoch = defaultdict(list)
+        self.history_batch = defaultdict(list)
+        self.history_epoch = defaultdict(list)
 
     def on_epoch_begin(self, epoch, logs={}):
         # Start to mesure time; initialize storage for batch metrics
@@ -162,30 +161,34 @@ class MetricHistory(Callback):
         # Store epoch metrics
         for k in self.params['metrics']:
             if k in logs:
-                self.metrics_epoch[k].append(logs[k])
-        self.metrics_epoch['time'].append(clock() - self.epoch_start)
+                self.history_epoch[k].append(logs[k])
+        self.history_epoch['time'].append(clock() - self.epoch_start)
         # Consolidate batch metrics
         for k, v in self.batches.items():
-            self.metrics_batch[k].append(np.array(v))
+            self.history_batch[k].append(np.array(v))
         del self.batches
 
     def on_train_end(self, logs={}):
         # Create the mini-batch metric array dictionary
-        self.metrics_batch = {k: np.array(v)
-                              for k, v in self.metrics_batch.items()}
+        self.history_batch = {k: np.array(v)
+                              for k, v in self.history_batch.items()}
 
+    @property
+    def history(self):
+        '''Alias for compatibility with the Keras History callback'''
+        return self.history_epoch
 
 # --------------------------------------------------------------------------
 
 
 def history_load(name):
     '''
-    Load a MetricHistory object from an HDF5 file
+    Load a TrainingHistory object from an HDF5 file
     '''
     if not name.endswith('.h5'):
         name += '.h5'
     f = h5py.File(name, 'r')
-    h = type('SavedHistory', (object,), {})
+    h = type('TrainingHistory', (object,), {})
     try:
         # Load params
         h.params = {}
@@ -196,26 +199,32 @@ def history_load(name):
                 v = [s.decode('utf-8') for s in v]
             h.params[k] = v
         # Load epoch metrics
-        g = f['metrics/epoch']
-        h.metrics_epoch = {k: np.copy(v) for k, v in g.items()}
+        g = f['history/epoch']
+        h.history_epoch = {k: np.copy(v) for k, v in g.items()}
         # Load batch metrics
-        g = f['metrics/batch']
-        h.metrics_batch = {k: np.copy(v) for k, v in g.items()}
+        if 'history/batch' in f:
+            g = f['history/batch']
+            h.history_batch = {k: np.copy(v) for k, v in g.items()}
+        else:
+            h.history_batch = None
     finally:
         f.close()
     return h
 
 
-def history_save(history, name):
+def history_save(history, name, verbose=True):
     '''
-    Save a MetricHistory object into an HDF5 file
+    Save either a TrainingHistory object, or a plain Keras History object,
+    into an HDF5 file
     It stores:
      * params
-     * metrics_epoch
-     * metrics_batch
+     * history_epoch
+     * history_batch (for TrainingHistory)
     '''
     if not name.endswith('.h5'):
         name += '.h5'
+    if verbose:
+        print('Saving training history ({}) into:'.format(type(history)), name)
     f = h5py.File(name, 'w')
     try:
         # Save params
@@ -227,13 +236,14 @@ def history_save(history, name):
                 v = [e.encode('utf-8') if isinstance(e, str) else e for e in v]
             g.attrs[k] = v
         # Save epoch metrics
-        g = f.create_group('metrics/epoch')
-        for n, m in history.metrics_epoch.items():
-            dat = g.create_dataset(n, data=np.array(m))
+        g = f.create_group('history/epoch')
+        for n, m in history.history.items():
+            g.create_dataset(n, data=np.array(m))
         # Save batch metrics
-        g = f.create_group('metrics/batch')
-        for n, m in history.metrics_batch.items():
-            dat = g.create_dataset(n, data=np.array(m))
+        if hasattr(history, 'history_batch'):
+            g = f.create_group('history/batch')
+            for n, m in history.history_batch.items():
+                g.create_dataset(n, data=np.array(m))
         f.flush()
     finally:
         f.close()
@@ -277,19 +287,23 @@ def model_load_old(basename, compile={}, history=True):
 
 # --------------------------------------------------------------------------
 
-def model_save(model, basename, history=None):
+def model_save(model, basename, verbose=True):
     """
-    Save a full model: architecture and weights, into a file
-      @param model (Model): the Keras model to save
-      @param basename (str): filename to use.
-      @param history (History): optional training history to save, as an additional
-        file
+    Save a full model (architecture and weights) into a file, plus its history
+    into another file.
+      @param model (Model or History): the Keras model to save, or a History
+       callback object (which also contains the model)
+      @param basename (str): basename to use.
     """
     if basename.endswith('.h5'):
         basename = basename[:-3]
-    model.save(basename+'.h5')
-    if history:
-        history_save(history, basename + '.h')
+    if isinstance(model, (History, TrainingHistory)):
+        if verbose:
+            print('Saving Keras model into:', basename+'.h5')
+        model.model.save(basename+'.h5')
+        history_save(model, basename + '.h', verbose)
+    else:
+        model.save(basename+'.h5')
 
 
 def model_load(basename, history=True):

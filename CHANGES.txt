@@ -3,6 +3,8 @@ v. 1.0.0
  * Added transform callable to console capture
  * Added model_thread_safe() function to enable dispatching TF models to a thread
  * Added accuracy computation to pred_show()
+ * Make history load/save compatible with standard Keras History object
+ * Rewrite model graph to work around a bug in Keras model_to_dot()
 
 v. 0.1.1
  Packaging fixes
