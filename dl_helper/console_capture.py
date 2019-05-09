@@ -328,7 +328,7 @@ class ProcessingThread(threading.Thread):
         '''
         Return the value returned by the executed call
         '''
-        return self._result if self._st == ThrStatus.ENDED else None
+        return self._result if self._st in (ThrStatus.ENDED, ThrStatus.REAPED) else None
 
     @property
     def output(self):
