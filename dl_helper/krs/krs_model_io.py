@@ -188,7 +188,9 @@ def history_load(name):
     if not name.endswith('.h5'):
         name += '.h5'
     f = h5py.File(name, 'r')
-    h = type('TrainingHistory', (object,), {})
+    H = type('TrainingHistory', (object,),
+             {'history': property(lambda s: s.history_epoch)})
+    h = H()
     try:
         # Load params
         h.params = {}
@@ -224,7 +226,8 @@ def history_save(history, name, verbose=True):
     if not name.endswith('.h5'):
         name += '.h5'
     if verbose:
-        print('Saving training history ({}) into:'.format(type(history)), name)
+        print('Saving training history ({}) into:'.format(type(history).__name__),
+              name)
     f = h5py.File(name, 'w')
     try:
         # Save params
@@ -320,4 +323,7 @@ def model_load(basename, history=True):
         return model
     elif not os.path.exists(basename + '.h.h5'):
         return model, None
-    return model, history_load(basename + '.h')
+
+    history = history_load(basename + '.h')
+    history.model = model
+    return model, history
