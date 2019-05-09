@@ -2,33 +2,30 @@
 Utilities for Keras models I/O
 Paulo Villegas, 2017-2019
 
-Keras native save_weights & load_weights methods choke on empty weights, since
-the h5py library can't load/save empty attributes (fixed in master, not yet in
-release 2.6). These functions solve the problem by skipping weight management
-in layers with no weights (e.g. an Activation or MaxPool layer)
+Definition of two functions, model_save() and model_load(), that can save a
+Keras model and also its associated training history
 """
 
-from __future__ import print_function
-import sys
 import os.path
 import numpy as np
 
+from keras.models import load_model
 from keras import backend as K
 import h5py
-
-
-if sys.version[0] == '3':
-    items = lambda x: x.items()
-else:
-    items = lambda x: x.iteritems()
 
 
 # --------------------------------------------------------------------------
 
 def save_weights(model, basename):
     """
+    *LEGACY*
     Modification of keras.engine.topology.Container.save_weights to avoid
     saving empty weights
+
+    Keras native save_weights & load_weights methods choke on empty weights, since
+    the h5py library can't load/save empty attributes (fixed in master, not yet in
+    release 2.6). These functions solve the problem by skipping weight management
+    in layers with no weights (e.g. an Activation or MaxPool layer)
     """
     try:
         f = h5py.File(basename+'.w.h5', 'w')
@@ -69,6 +66,7 @@ def save_weights(model, basename):
 
 def load_weights(model, filepath):
     """
+    *LEGACY*
     Modification of keras.engine.topology.Container.load_weights to check
     layer weights presence before accessing
     """
@@ -132,22 +130,21 @@ def load_weights(model, filepath):
 
 # --------------------------------------------------------------------------
 
-from keras.callbacks import Callback
+from keras.callbacks import Callback, History
 from collections import defaultdict
-import numpy as np
 import time
 
 clock = getattr(time, 'perf_time', time.clock)
 
-class MetricHistory(Callback):
+class TrainingHistory(Callback):
     '''
     A Keras callback class that tracks all evaluation metrics,
-    both across mini-batches (metrics_batch) and across epochs (metrics_epoch)
+    both across mini-batches (history_batch) and across epochs (history_epoch)
     '''
 
     def on_train_begin(self, logs={}):
-        self.metrics_batch = defaultdict(list)
-        self.metrics_epoch = defaultdict(list)
+        self.history_batch = defaultdict(list)
+        self.history_epoch = defaultdict(list)
 
     def on_epoch_begin(self, epoch, logs={}):
         # Start to mesure time; initialize storage for batch metrics
@@ -164,78 +161,89 @@ class MetricHistory(Callback):
         # Store epoch metrics
         for k in self.params['metrics']:
             if k in logs:
-                self.metrics_epoch[k].append(logs[k])
-        self.metrics_epoch['time'].append(clock() - self.epoch_start)
+                self.history_epoch[k].append(logs[k])
+        self.history_epoch['time'].append(clock() - self.epoch_start)
         # Consolidate batch metrics
-        for k, v in items(self.batches):
-            self.metrics_batch[k].append(np.array(v))
+        for k, v in self.batches.items():
+            self.history_batch[k].append(np.array(v))
         del self.batches
 
     def on_train_end(self, logs={}):
         # Create the mini-batch metric array dictionary
-        self.metrics_batch = {k: np.array(v)
-                              for k, v in items(self.metrics_batch)}
+        self.history_batch = {k: np.array(v)
+                              for k, v in self.history_batch.items()}
 
+    @property
+    def history(self):
+        '''Alias for compatibility with the Keras History callback'''
+        return self.history_epoch
 
 # --------------------------------------------------------------------------
 
 
 def history_load(name):
     '''
-    Load a DetailedHistory object from an HDF5 file
+    Load a TrainingHistory object from an HDF5 file
     '''
     if not name.endswith('.h5'):
         name += '.h5'
     f = h5py.File(name, 'r')
-    h = type('SavedHistory', (object,), {})
+    h = type('TrainingHistory', (object,), {})
     try:
         # Load params
         h.params = {}
         g = f['params']
-        for k, v in items(g.attrs):
+        for k, v in g.attrs.items():
             # convert an NumPy string array into a list of str
             if isinstance(v, np.ndarray) and v.dtype.char == 'S':
                 v = [s.decode('utf-8') for s in v]
             h.params[k] = v
         # Load epoch metrics
-        g = f['metrics/epoch']
-        h.metrics_epoch = {k: np.copy(v) for k, v in items(g)}
+        g = f['history/epoch']
+        h.history_epoch = {k: np.copy(v) for k, v in g.items()}
         # Load batch metrics
-        g = f['metrics/batch']
-        h.metrics_batch = {k: np.copy(v) for k, v in items(g)}
+        if 'history/batch' in f:
+            g = f['history/batch']
+            h.history_batch = {k: np.copy(v) for k, v in g.items()}
+        else:
+            h.history_batch = None
     finally:
         f.close()
     return h
 
 
-def history_save(history, name):
+def history_save(history, name, verbose=True):
     '''
-    Save a DetailedHistory object into an HDF5 file
+    Save either a TrainingHistory object, or a plain Keras History object,
+    into an HDF5 file
     It stores:
      * params
-     * metrics_epoch
-     * metrics_batch
+     * history_epoch
+     * history_batch (for TrainingHistory)
     '''
     if not name.endswith('.h5'):
         name += '.h5'
+    if verbose:
+        print('Saving training history ({}) into:'.format(type(history)), name)
     f = h5py.File(name, 'w')
     try:
         # Save params
         g = f.create_group('params')
-        for k, v in items(history.params):
+        for k, v in history.params.items():
             # check a list of strings -- possible errors in H5 (no unicode support)
             # see https://github.com/h5py/h5py/issues/441
             if isinstance(v, list):
                 v = [e.encode('utf-8') if isinstance(e, str) else e for e in v]
             g.attrs[k] = v
         # Save epoch metrics
-        g = f.create_group('metrics/epoch')
-        for n, m in items(history.metrics_epoch):
-            dat = g.create_dataset(n, data=np.array(m))
+        g = f.create_group('history/epoch')
+        for n, m in history.history.items():
+            g.create_dataset(n, data=np.array(m))
         # Save batch metrics
-        g = f.create_group('metrics/batch')
-        for n, m in items(history.metrics_batch):
-            dat = g.create_dataset(n, data=np.array(m))
+        if hasattr(history, 'history_batch'):
+            g = f.create_group('history/batch')
+            for n, m in history.history_batch.items():
+                g.create_dataset(n, data=np.array(m))
         f.flush()
     finally:
         f.close()
@@ -243,13 +251,13 @@ def history_save(history, name):
 
 # --------------------------------------------------------------------------
 
-def model_save(model, basename, history=None):
+def model_save_old(model, basename, history=None):
     """
-    Save a full model: architecture and weights, into a file
+    *LEGACY* Save a full model: architecture and weights, into a file
       @param model (Model): the Keras model to save
       @param basename (str): filename to use. Two files will be written: a
         JSON file (model architecture) and an HDF5 file (model weights)
-      @param history (History): optional training history to save
+      @param history (History): optional training history to save, as a third file
     """
     with open(basename+'.m.json', 'w') as f:
         f.write(model.to_json())
@@ -258,10 +266,10 @@ def model_save(model, basename, history=None):
         history_save(history, basename + '.h')
 
 
-def model_load(basename, compile={}, history=True):
+def model_load_old(basename, compile={}, history=True):
     """
-    Load a model saved with model_save(): structure & weights will be
-    restored
+    *LEGACY* Load a model saved with model_save_old(): structure & weights will be
+    restored, and the model will be compiled with the passed arguments
       @param basename (str): basename used to save it
       @param compile (dict): arguments to be used when compiling the model
       @param history (bool): load also training history, if available
@@ -270,6 +278,44 @@ def model_load(basename, compile={}, history=True):
     model = model_from_json(open(basename+'.m.json').read())
     model.compile(**compile)
     load_weights(model, basename+'.w.h5')
+    if not history:
+        return model
+    elif not os.path.exists(basename + '.h.h5'):
+        return model, None
+    return model, history_load(basename + '.h')
+
+
+# --------------------------------------------------------------------------
+
+def model_save(model, basename, verbose=True):
+    """
+    Save a full model (architecture and weights) into a file, plus its history
+    into another file.
+      @param model (Model or History): the Keras model to save, or a History
+       callback object (which also contains the model)
+      @param basename (str): basename to use.
+    """
+    if basename.endswith('.h5'):
+        basename = basename[:-3]
+    if isinstance(model, (History, TrainingHistory)):
+        if verbose:
+            print('Saving Keras model into:', basename+'.h5')
+        model.model.save(basename+'.h5')
+        history_save(model, basename + '.h', verbose)
+    else:
+        model.save(basename+'.h5')
+
+
+def model_load(basename, history=True):
+    """
+    Load a model saved with model_save(): structure & weights will be
+    restored, and the model will be re-compiled
+      @param basename (str): basename used to save it
+      @param history (bool): load also training history, if available
+    """
+    if basename.endswith('.h5'):
+        basename = basename[:-3]
+    model = load_model(basename + '.h5')
     if not history:
         return model
     elif not os.path.exists(basename + '.h.h5'):
